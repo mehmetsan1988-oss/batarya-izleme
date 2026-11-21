@@ -314,6 +314,8 @@
     const parca = ['Adaptör ' + (v.av || 0).toFixed(2) + ' V'];
     if (v.fw) parca.push(v.fw);
     parca.push('toplam ' + (v.kn || 0) + ' kesinti');
+    if (v.ram !== undefined) parca.push('RAM %' + v.ram);
+    if (v.flash !== undefined) parca.push('Flash %' + v.flash);
     sebEl.querySelector('.bilgi').innerHTML = parca.join(' · ') + (v.demo ? '<span class="demo">DEMO</span>' : '');
     const ge = v.ge || [];
     sebEl.querySelector('.seb-liste').textContent = ge.length

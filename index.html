@@ -74,6 +74,7 @@
   <div class="durumlar">
     <span class="pill" id="bulut">Bulut: bağlanıyor...</span>
     <span class="pill" id="hmi">HMI ekran: --</span>
+    <span class="pill" id="hmiPil" style="display:none" title="HMI ekranın dahili pili">HMI pil: --</span>
     <button class="cikis" id="cikisBtn" title="Bu cihazda hatırlanan şifreyi siler">Çıkış</button>
   </div>
 </header>
@@ -289,7 +290,7 @@
     istemci.on('connect', () => {
       bulut('bağlı', 'ok');
       if (ilkBaglanti) { ilkBaglanti = false; sifreSakla(hatirla ? sifre : ''); girisEl.classList.remove('acik'); }
-      istemci.subscribe(['msan/batarya/+', 'msan/hmi/durum']);
+      istemci.subscribe(['msan/batarya/+', 'msan/hmi/durum', 'msan/hmi/pil']);
     });
     istemci.on('reddedildi', (kod) => {
       bulut('giriş reddedildi', 'err');
@@ -324,6 +325,16 @@
       const acik = metin === 'online';
       hmiEl.textContent = 'HMI ekran: ' + (acik ? 'çevrimiçi' : 'çevrimdışı');
       hmiEl.className = 'pill ' + (acik ? 'ok' : 'err');
+      return;
+    }
+    if (konu === 'msan/hmi/pil') {
+      const pe = document.getElementById('hmiPil');
+      let p; try { p = JSON.parse(metin); } catch (e) { return; }
+      if (!p || p.s === 'yok' || typeof p.p !== 'number') { pe.style.display = 'none'; return; }
+      const ad = { sarj: '⚡ şarj oluyor', dolu: 'dolu, USB', pil: 'pilden' }[p.s] || '';
+      pe.textContent = 'HMI pil: %' + p.p + (ad ? ' · ' + ad : '');
+      pe.className = 'pill ' + (p.s !== 'pil' ? 'ok' : p.p < 20 ? 'err' : p.p < 40 ? 'warn' : 'ok');
+      pe.style.display = '';
       return;
     }
     const m = konu.match(/^msan\/batarya\/([1-4])$/);

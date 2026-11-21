@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Batarya İzleme (Bulut)</title>
+<!--
+  HMI Batarya İzleme — BULUT İZLEME SAYFASI
+  HMI ekran kapalıyken / başka yerdeyken batarya kartlarını doğrudan buluttan (EMQX) izler.
+  Çift tıklayıp tarayıcıda açın; internet olan her yerde çalışır.
+  Bağlantı: EMQX WebSocket (wss, 8084), kullanıcı "izleme" — YALNIZCA OKUMA yetkisi (msan/# abone).
+  Kartlara komut gönderemez (oku/bul/güncelle HMI ekranın işidir).
+  Şifre bu dosyada YOKTUR: sayfa açılınca sorulur ("hatırla" seçilirse yalnızca o cihazın tarayıcısında saklanır).
+  Bu sayede dosya internette (ör. GitHub Pages) güvenle yayımlanabilir.
+  Yüzde tabloları ve çevrimdışı kuralları HMI ekranla aynıdır (HMI_Batarya_Izleme.ino: calculateBatterySoc).
+-->
+<style>
+  :root {
+    --bg: #12161B; --card: #1E252D; --border: #2E3843; --text: #F4F7FA; --muted: #8E9BA8;
+    --ok: #4CD964; --warn: #FFC94D; --err: #FF5C5C; --accent: #56D6C9;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; padding: 14px 18px; background: #1B2026; border-bottom: 1px solid var(--border); }
+  h1 { margin: 0; font-size: 20px; font-weight: 700; }
+  h1 small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+  .durumlar { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 14px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: rgba(76,217,100,0.45); }
+  .pill.err { color: var(--err); border-color: rgba(255,92,92,0.45); }
+  .pill.warn { color: var(--warn); border-color: rgba(255,201,77,0.45); }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .kart { background: var(--card); border: 3px solid var(--border); border-radius: 14px; padding: 16px; }
+  .kart.on { border-color: #2EE588; }
+  .kart.eski { border-color: #4A5561; }
+  @keyframes dusukBlink { 0%, 49% { border-color: #FF2D2D; } 50%, 100% { border-color: #2EE588; } }
+  .kart.low { border-width: 5px; animation: dusukBlink 1s infinite; }
+  .baslik { display: flex; justify-content: space-between; align-items: center; font-size: 18px; font-weight: 700; }
+  .wifi { font-size: 13px; font-weight: 600; color: #7CF29A; }
+  .satir { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 10px; }
+  .volt { font-size: 40px; font-weight: 700; letter-spacing: 0.5px; }
+  .pil { position: relative; width: 120px; height: 46px; border: 3px solid #D9E1E8; border-radius: 8px; padding: 3px; }
+  .pil::after { content: ""; position: absolute; right: -9px; top: 13px; width: 6px; height: 14px; background: #D9E1E8; border-radius: 0 3px 3px 0; }
+  .dolu { height: 100%; width: 0; border-radius: 4px; background: #2E9E4F; transition: width 0.4s ease, background 0.4s ease; }
+  .yuzde { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 17px; text-shadow: 0 1px 2px rgba(0,0,0,0.7); }
+  .alt { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .rozet { font-size: 14px; font-weight: 700; padding: 3px 14px; border-radius: 12px; background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.2); }
+  @keyframes rozetBlink { 0%, 49% { background-color: #1E7A45; } 50%, 100% { background-color: #34C46E; } }
+  .kart.on .rozet { animation: rozetBlink 1s infinite; color: #fff; }
+  .yas { font-size: 15px; color: var(--muted); }
+  .bilgi { margin-top: 10px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .demo { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 6px; background: rgba(255,170,0,0.2); color: #FFB020; margin-left: 6px; }
+  .not { margin-top: 18px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+  @media (max-width: 420px) { .volt { font-size: 34px; } .pil { width: 104px; } }
+  .cikis { font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 14px; background: transparent; border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
+  .cikis:hover { color: var(--text); }
+  #giris { position: fixed; inset: 0; background: rgba(10,13,16,0.92); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
+  #giris.acik { display: flex; }
+  .giris-kutu { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+  .giris-kutu h2 { margin: 0 0 6px; font-size: 19px; }
+  .giris-kutu p { margin: 0 0 16px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .giris-kutu label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .giris-kutu input[type=password], .giris-kutu input[type=text] { width: 100%; padding: 11px 12px; font-size: 16px; border-radius: 8px; border: 1px solid var(--border); background: #14191F; color: var(--text); margin-bottom: 12px; }
+  .giris-kutu .hatirla { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); margin-bottom: 16px; }
+  .giris-kutu button { width: 100%; padding: 11px; font-size: 16px; font-weight: 700; border-radius: 8px; border: 0; background: #2E9E4F; color: #fff; cursor: pointer; }
+  .giris-kutu button:disabled { opacity: 0.6; cursor: default; }
+  .giris-hata { color: var(--err); font-size: 13px; min-height: 18px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Batarya İzleme <small>Buluttan canlı izleme — HMI ekran gerekmez</small></h1>
+  <div class="durumlar">
+    <span class="pill" id="bulut">Bulut: bağlanıyor...</span>
+    <span class="pill" id="hmi">HMI ekran: --</span>
+    <button class="cikis" id="cikisBtn" title="Bu cihazda hatırlanan şifreyi siler">Çıkış</button>
+  </div>
+</header>
+<div id="giris">
+  <form class="giris-kutu" id="girisForm" autocomplete="on">
+    <h2>Batarya İzleme</h2>
+    <p>Bulut izleme şifresini girin. Bu sayfa yalnızca okur; kartlara komut göndermez.</p>
+    <input type="text" name="username" value="izleme" autocomplete="username" style="display:none">
+    <label for="sifre">İzleme şifresi</label>
+    <input type="password" id="sifre" autocomplete="current-password" required>
+    <label class="hatirla"><input type="checkbox" id="hatirla" checked> Bu cihazda hatırla</label>
+    <button type="submit" id="girisBtn">Bağlan</button>
+    <div class="giris-hata" id="girisHata"></div>
+  </form>
+</div>
+<main>
+  <div class="grid" id="grid"></div>
+  <div class="not">
+    Veriler kartlardan doğrudan buluta (EMQX) gelir; HMI ekran kapalıyken de görünür.
+    Sayfa yalnızca okur, kartlara komut göndermez. Kartlar derin uyku modundaysa veri 5 dakikada bir gelir.
+    "Son bilinen değer": sayfa açılınca buluttan gelen saklanmış son ölçüm; yaşı bilinmez, kartın şu an açık olduğunu göstermez.
+  </div>
+</main>
+
+<script>
+  // ---- Küçük MQTT 3.1.1 istemcisi (WebSocket üzerinden; harici kütüphane gerekmez) ----
+  // Yalnızca gereken kısım: CONNECT, SUBSCRIBE (QoS0), gelen PUBLISH, PINGREQ. Kopunca 5 sn'de yeniden bağlanır.
+  function MiniMqtt(url, secenek) {
+    const olay = {};
+    const on = (ad, f) => { (olay[ad] = olay[ad] || []).push(f); };
+    const yay = (ad, ...a) => (olay[ad] || []).forEach(f => f(...a));
+    const kodla = s => new TextEncoder().encode(s);
+    const uzunluklu = b => { const o = new Uint8Array(2 + b.length); o[0] = b.length >> 8; o[1] = b.length & 255; o.set(b, 2); return o; };
+    const birlestir = parcalar => { let n = 0; parcalar.forEach(p => n += p.length); const o = new Uint8Array(n); let k = 0; parcalar.forEach(p => { o.set(p, k); k += p.length; }); return o; };
+    function paket(tip, govde) {
+      const uz = []; let x = govde.length;
+      do { let b = x % 128; x = Math.floor(x / 128); if (x > 0) b |= 128; uz.push(b); } while (x > 0);
+      return birlestir([new Uint8Array([tip]), new Uint8Array(uz), govde]);
+    }
+    let ws = null, tampon = new Uint8Array(0), ping = null, aboneler = [], kapatildi = false, paketNo = 1;
+    let acildi = false, onaylandi = false;   // WebSocket açıldı mı / sunucu girişi onayladı mı
+    function gonder(p) { if (ws && ws.readyState === 1) ws.send(p); }
+    function baglan() {
+      acildi = false; onaylandi = false;
+      ws = new WebSocket(url, ['mqtt']);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => {
+        acildi = true;
+        const bayrak = 0x80 | 0x40 | 0x02;   // kullanıcı adı + şifre + temiz oturum
+        const vh = new Uint8Array([0, 4, 77, 81, 84, 84, 4, bayrak, 0, secenek.keepalive]);
+        gonder(paket(0x10, birlestir([vh, uzunluklu(kodla(secenek.clientId)), uzunluklu(kodla(secenek.username)), uzunluklu(kodla(secenek.password))])));
+      };
+      ws.onmessage = (m) => { tampon = birlestir([tampon, new Uint8Array(m.data)]); coz(); };
+      ws.onerror = () => yay('error', 'WebSocket hatası');
+      ws.onclose = () => {
+        clearInterval(ping); ping = null; tampon = new Uint8Array(0);
+        // Sunucuya ulaşıldı ama giriş onaylanmadan kapandı: EMQX yanlış şifrede böyle kapatır
+        if (kapatildi) return;   // giriş reddedildi ya da çıkış yapıldı: yeniden bağlanma yok
+        if (acildi && !onaylandi) { kapatildi = true; yay('reddedildi', 5); return; }
+        yay('offline');
+        if (!kapatildi) setTimeout(() => { yay('reconnect'); baglan(); }, 5000);
+      };
+    }
+    function coz() {
+      while (tampon.length >= 2) {
+        let carpan = 1, uz = 0, i = 1, b;
+        do { if (i >= tampon.length) return; b = tampon[i++]; uz += (b & 127) * carpan; carpan *= 128; } while (b & 128);
+        if (tampon.length < i + uz) return;
+        const tip = tampon[0], g = tampon.slice(i, i + uz);
+        tampon = tampon.slice(i + uz);
+        if ((tip >> 4) === 2) {                        // CONNACK
+          if (g[1] !== 0) { kapatildi = true; yay('reddedildi', g[1]); ws.close(); return; }
+          onaylandi = true;
+          ping = setInterval(() => gonder(new Uint8Array([0xC0, 0])), secenek.keepalive * 800);
+          yay('connect');
+        } else if ((tip >> 4) === 3) {                 // PUBLISH
+          const qos = (tip >> 1) & 3, retain = !!(tip & 1);
+          const tl = (g[0] << 8) | g[1];
+          const konu = new TextDecoder().decode(g.slice(2, 2 + tl));
+          let k = 2 + tl;
+          if (qos > 0) k += 2;
+          yay('message', konu, new TextDecoder().decode(g.slice(k)), { retain });
+        }
+      }
+    }
+    baglan();
+    return {
+      on,
+      close() { kapatildi = true; clearInterval(ping); if (ws) ws.close(); },
+      subscribe(konular) {
+        aboneler = konular;
+        const govde = [new Uint8Array([paketNo >> 8, paketNo & 255])];
+        paketNo = (paketNo % 65535) + 1;
+        konular.forEach(t => { govde.push(uzunluklu(kodla(t))); govde.push(new Uint8Array([0])); });
+        gonder(paket(0x82, birlestir(govde)));
+      }
+    };
+  }
+</script>
+<script>
+  // ---- Bağlantı (izleme kullanıcısı: yalnızca okuma) ----
+  const SUNUCU = 'wss://j16ef900.ala.eu-central-1.emqxsl.com:8084/mqtt';
+  const KULLANICI = 'izleme';
+  const SAKLAMA_ANAHTARI = 'bulutIzleme.sifre';   // "hatırla" seçilirse yalnızca bu tarayıcıda
+
+  const KARTLAR = ['1 - MODEM UPS', '2 - KAMERA', '3 - D. AYDINLATMA', '4 - Ç. AYDINLATMA'];
+  const MODLAR = ['Sürekli açık', 'Derin uyku', 'Hafif uyku'];
+  const ACILIS = { 1: 'elektrik verildi', 3: 'yazılım', 4: 'çökme', 5: 'bekçi', 6: 'bekçi', 7: 'bekçi', 8: 'derin uyku', 9: 'voltaj düştü' };
+
+  // HMI ekranla aynı yüzde tabloları (1: Li-ion 4S, 2-4: LiFePO4 1S)
+  const LIFEPO4 = [[2.80,0],[3.10,10],[3.20,20],[3.24,30],[3.26,40],[3.28,50],[3.29,60],[3.30,70],[3.32,80],[3.35,90],[3.40,100]];
+  const LIION4S = [[12.00,0],[13.20,10],[13.80,20],[14.20,30],[14.48,40],[14.80,50],[15.20,60],[15.60,70],[16.00,80],[16.40,90],[16.80,100]];
+  function yuzde(i, v) {
+    const t = i === 0 ? LIION4S : LIFEPO4;
+    if (v <= t[0][0]) return 0;
+    if (v >= t[t.length - 1][0]) return 100;
+    for (let k = 0; k < t.length - 1; k++) {
+      if (v >= t[k][0] && v <= t[k + 1][0]) {
+        const r = (v - t[k][0]) / (t[k + 1][0] - t[k][0]);
+        return Math.round(t[k][1] + r * (t[k + 1][1] - t[k][1]));
+      }
+    }
+    return 0;
+  }
+  function wifiYuzde(rssi) { if (!rssi) return null; return Math.max(0, Math.min(100, 2 * (rssi + 100))); }
+  function yasYaz(sn) {
+    if (sn < 60) return sn + ' sn önce';
+    if (sn < 3600) return Math.floor(sn / 60) + ' dk önce';
+    return Math.floor(sn / 3600) + ' sa önce';
+  }
+
+  // ---- Kartları oluştur ----
+  const grid = document.getElementById('grid');
+  const durum = KARTLAR.map((ad, i) => {
+    const el = document.createElement('div');
+    el.className = 'kart';
+    el.innerHTML =
+      '<div class="baslik"><span>' + ad + '</span><span class="wifi"></span></div>' +
+      '<div class="satir"><span class="volt">--.-- V</span>' +
+      '<div class="pil"><div class="dolu"></div><span class="yuzde">%--</span></div></div>' +
+      '<div class="alt"><span class="rozet">Veri bekleniyor</span><span class="yas"></span></div>' +
+      '<div class="bilgi"></div>';
+    grid.appendChild(el);
+    return { el, veri: null, canliMs: 0, saklanmis: false };
+  });
+
+  function ciz() {
+    const simdi = Date.now();
+    durum.forEach((d, i) => {
+      const e = d.el, v = d.veri;
+      if (!v) return;
+      const p = yuzde(i, v.v);
+      const aralik = Math.max(2, v.aralik || 10);
+      const sinir = Math.max(2 * aralik + 15, 35) * 1000;          // HMI ile aynı: 2 x aralık + 15 sn
+      const canli = d.canliMs > 0 && (simdi - d.canliMs) < sinir;
+      e.querySelector('.volt').textContent = v.v.toFixed(2) + ' V';
+      e.querySelector('.yuzde').textContent = '%' + p;
+      const dolu = e.querySelector('.dolu');
+      dolu.style.width = p + '%';
+      dolu.style.background = p < 20 ? '#C93C3C' : (p < 50 ? '#B98A00' : '#2E9E4F');
+      const w = wifiYuzde(v.rssi);
+      e.querySelector('.wifi').textContent = (w !== null && canli) ? '📶 %' + w : '';
+      const rozet = e.querySelector('.rozet'), yas = e.querySelector('.yas');
+      if (canli) {
+        rozet.textContent = 'Çevrimiçi'; rozet.style.color = '';
+        yas.textContent = yasYaz(Math.round((simdi - d.canliMs) / 1000));
+      } else if (d.canliMs > 0) {
+        rozet.textContent = 'Çevrimdışı'; rozet.style.color = '#FFD6D6';
+        yas.textContent = 'son veri ' + yasYaz(Math.round((simdi - d.canliMs) / 1000));
+      } else {
+        rozet.textContent = 'Son bilinen değer'; rozet.style.color = '#C9D2DA';
+        yas.textContent = 'yaşı bilinmiyor';
+      }
+      e.classList.toggle('on', canli);
+      e.classList.toggle('eski', !canli);
+      e.classList.toggle('low', canli && p < 20);
+      const parca = [];
+      if (v.fw) parca.push(v.fw);
+      if (v.mod !== undefined && MODLAR[v.mod]) parca.push(MODLAR[v.mod]);
+      if (v.ram !== undefined) parca.push('RAM %' + v.ram);
+      if (v.flash !== undefined) parca.push('Flash %' + v.flash);
+      if (v.rst && ACILIS[v.rst]) parca.push('son açılış: ' + ACILIS[v.rst]);
+      e.querySelector('.bilgi').innerHTML = parca.join(' · ') + (v.demo ? '<span class="demo">DEMO</span>' : '');
+    });
+  }
+  setInterval(ciz, 1000);
+
+  // ---- Bulut bağlantısı ----
+  const bulutEl = document.getElementById('bulut'), hmiEl = document.getElementById('hmi');
+  function bulut(metin, sinif) { bulutEl.textContent = 'Bulut: ' + metin; bulutEl.className = 'pill ' + (sinif || ''); }
+  // ---- Giriş: şifre sorulur, istenirse bu cihazda saklanır ----
+  const girisEl = document.getElementById('giris'), girisForm = document.getElementById('girisForm');
+  const sifreEl = document.getElementById('sifre'), hatirlaEl = document.getElementById('hatirla');
+  const girisBtn = document.getElementById('girisBtn'), girisHata = document.getElementById('girisHata');
+  function saklananSifre() { try { return localStorage.getItem(SAKLAMA_ANAHTARI) || ''; } catch (e) { return ''; } }
+  function sifreSakla(s) { try { if (s) localStorage.setItem(SAKLAMA_ANAHTARI, s); else localStorage.removeItem(SAKLAMA_ANAHTARI); } catch (e) {} }
+  function girisGoster(hata) {
+    girisHata.textContent = hata || '';
+    girisBtn.disabled = false; girisBtn.textContent = 'Bağlan';
+    girisEl.classList.add('acik');
+    setTimeout(() => sifreEl.focus(), 50);
+  }
+  let istemci = null;
+  function izlemeyeBasla(sifre, hatirla, giristen) {
+    if (istemci) istemci.close();
+    bulut('bağlanıyor...', 'warn');
+    let ilkBaglanti = true;
+    istemci = MiniMqtt(SUNUCU, {
+      username: KULLANICI, password: sifre, keepalive: 30,
+      clientId: 'msan-izleme-web-' + Math.random().toString(16).slice(2, 10)
+    });
+    istemci.on('connect', () => {
+      bulut('bağlı', 'ok');
+      if (ilkBaglanti) { ilkBaglanti = false; sifreSakla(hatirla ? sifre : ''); girisEl.classList.remove('acik'); }
+      istemci.subscribe(['msan/batarya/+', 'msan/hmi/durum']);
+    });
+    istemci.on('reddedildi', (kod) => {
+      bulut('giriş reddedildi', 'err');
+      sifreSakla('');
+      girisGoster((kod === 4 || kod === 5) ? 'Şifre hatalı.' : 'Bulut bağlantıyı reddetti (kod ' + kod + ').');
+    });
+    istemci.on('reconnect', () => bulut('yeniden bağlanıyor...', 'warn'));
+    istemci.on('offline', () => {
+      bulut('bağlantı yok (internet?)', 'err');
+      if (giristen && ilkBaglanti) girisGoster('Buluta ulaşılamadı. İnternet bağlantısını kontrol edin.');
+    });
+    istemci.on('error', (h) => bulut('hata: ' + h, 'err'));
+    istemci.on('message', mesajIsle);
+  }
+  girisForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!sifreEl.value) return;
+    girisBtn.disabled = true; girisBtn.textContent = 'Bağlanıyor...'; girisHata.textContent = '';
+    izlemeyeBasla(sifreEl.value, hatirlaEl.checked, true);
+  });
+  document.getElementById('cikisBtn').addEventListener('click', () => {
+    if (istemci) { istemci.close(); istemci = null; }
+    sifreSakla(''); sifreEl.value = '';
+    bulut('bağlı değil', 'err');
+    girisGoster('');
+  });
+  const kayitli = saklananSifre();
+  if (kayitli) izlemeyeBasla(kayitli, true, false); else { bulut('giriş bekleniyor', 'warn'); girisGoster(''); }
+
+  function mesajIsle(konu, metin, paket) {
+    if (konu === 'msan/hmi/durum') {
+      const acik = metin === 'online';
+      hmiEl.textContent = 'HMI ekran: ' + (acik ? 'çevrimiçi' : 'çevrimdışı');
+      hmiEl.className = 'pill ' + (acik ? 'ok' : 'err');
+      return;
+    }
+    const m = konu.match(/^msan\/batarya\/([1-4])$/);
+    if (!m) return;
+    let v;
+    try { v = JSON.parse(metin); } catch (e) { const s = parseFloat(metin); if (isNaN(s)) return; v = { v: s }; }
+    if (!v || typeof v.v !== 'number' || v.v < 0.5 || v.v > 30) return;   // parça onayı vb. (voltaj yok)
+    const d = durum[+m[1] - 1];
+    d.veri = Object.assign({}, d.veri || {}, v);
+    if (!paket.retain) d.canliMs = Date.now();
+    ciz();
+  }
+</script>
+</body>
+</html>

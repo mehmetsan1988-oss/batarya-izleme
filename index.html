@@ -52,6 +52,13 @@
   .bilgi { margin-top: 10px; font-size: 12px; color: var(--muted); line-height: 1.5; }
   .demo { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 6px; background: rgba(255,170,0,0.2); color: #FFB020; margin-left: 6px; }
   .not { margin-top: 18px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+  /* Şebeke kartı (kart 5): elektrik var / kesik */
+  .seb-durum { font-size: 30px; font-weight: 800; margin: 14px 0 4px; }
+  .seb-durum.var { color: var(--ok); } .seb-durum.yok { color: var(--err); }
+  .seb-sure { font-size: 15px; color: var(--text); margin-bottom: 12px; min-height: 19px; }
+  .seb-liste { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.55; white-space: pre-line; }
+  @keyframes sebBlink { 0%, 49% { border-color: #FF2D2D; } 50%, 100% { border-color: #5A1F1F; } }
+  .kart.kesik { border-width: 5px; animation: sebBlink 1s infinite; }
   @media (max-width: 420px) { .volt { font-size: 34px; } .pil { width: 104px; } }
   .cikis { font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 14px; background: transparent; border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
   .cikis:hover { color: var(--text); }
@@ -75,6 +82,7 @@
     <span class="pill" id="bulut">Bulut: bağlanıyor...</span>
     <span class="pill" id="hmi">HMI ekran: --</span>
     <span class="pill" id="hmiPil" style="display:none" title="HMI ekranın dahili pili">HMI pil: --</span>
+    <span class="pill" id="sebPill" style="display:none" title="Şebeke elektriği (kart 5)">Şebeke: --</span>
     <button class="cikis" id="cikisBtn" title="Bu cihazda hatırlanan şifreyi siler">Çıkış</button>
   </div>
 </header>
@@ -260,6 +268,61 @@
       if (v.rst && ACILIS[v.rst]) parca.push('son açılış: ' + ACILIS[v.rst]);
       e.querySelector('.bilgi').innerHTML = parca.join(' · ') + (v.demo ? '<span class="demo">DEMO</span>' : '');
     });
+    sebekeCiz();
+  }
+
+  // ---- Şebeke kartı (kart 5): elektrik var / kesik ----
+  const sebEl = document.createElement('div');
+  sebEl.className = 'kart eski';
+  sebEl.innerHTML =
+    '<div class="baslik"><span>5 - ŞEBEKE ELEKTRİĞİ</span><span class="wifi"></span></div>' +
+    '<div class="seb-durum">--</div><div class="seb-sure">Veri bekleniyor</div>' +
+    '<div class="alt"><span class="rozet">Veri bekleniyor</span><span class="yas"></span></div>' +
+    '<div class="bilgi"></div><div class="seb-liste"></div>';
+  grid.appendChild(sebEl);
+  const seb = { veri: null, canliMs: 0 };
+  function sureYaz(sn) {
+    if (sn < 0) sn = 0;
+    if (sn < 60) return sn + ' sn';
+    if (sn < 3600) return Math.floor(sn / 60) + ' dk ' + (sn % 60) + ' sn';
+    if (sn < 86400) return Math.floor(sn / 3600) + ' sa ' + Math.floor((sn % 3600) / 60) + ' dk';
+    return Math.floor(sn / 86400) + ' gün ' + Math.floor((sn % 86400) / 3600) + ' sa';
+  }
+  function saatYaz(t) {
+    if (!t || t < 1700000000) return '?';
+    return new Date(t * 1000).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+  function sebekeCiz() {
+    const v = seb.veri;
+    if (!v) return;
+    const simdi = Date.now(), sn = Math.floor(simdi / 1000);
+    const sinir = Math.max(2 * Math.max(2, v.aralik || 10) + 15, 35) * 1000;
+    const canli = seb.canliMs > 0 && (simdi - seb.canliMs) < sinir;
+    const du = sebEl.querySelector('.seb-durum');
+    du.textContent = v.var ? '⚡ ELEKTRİK VAR' : '✖ ELEKTRİK KESİK';
+    du.className = 'seb-durum ' + (v.var ? 'var' : 'yok');
+    sebEl.querySelector('.seb-sure').textContent = (v.deg > 1700000000) ? ((v.var ? 'Geleli ' : 'Kesik süre: ') + sureYaz(sn - v.deg)) : '';
+    const rozet = sebEl.querySelector('.rozet'), yas = sebEl.querySelector('.yas');
+    if (canli) { rozet.textContent = 'Çevrimiçi'; rozet.style.color = ''; yas.textContent = yasYaz(Math.round((simdi - seb.canliMs) / 1000)); }
+    else if (seb.canliMs > 0) { rozet.textContent = 'Çevrimdışı'; rozet.style.color = '#FFD6D6'; yas.textContent = 'son veri ' + yasYaz(Math.round((simdi - seb.canliMs) / 1000)); }
+    else { rozet.textContent = 'Son bilinen durum'; rozet.style.color = '#C9D2DA'; yas.textContent = 'canlı veri bekleniyor…'; }
+    sebEl.classList.toggle('on', canli && v.var);
+    sebEl.classList.toggle('eski', !canli);
+    sebEl.classList.toggle('kesik', !v.var);
+    const w = wifiYuzde(v.rssi);
+    sebEl.querySelector('.wifi').textContent = (w !== null && canli) ? '📶 %' + w : '';
+    const parca = ['Adaptör ' + (v.av || 0).toFixed(2) + ' V'];
+    if (v.fw) parca.push(v.fw);
+    parca.push('toplam ' + (v.kn || 0) + ' kesinti');
+    sebEl.querySelector('.bilgi').innerHTML = parca.join(' · ') + (v.demo ? '<span class="demo">DEMO</span>' : '');
+    const ge = v.ge || [];
+    sebEl.querySelector('.seb-liste').textContent = ge.length
+      ? 'Son kesintiler:\n' + ge.map(g => saatYaz(g[0]) + ' → ' + (g[1] === 0 ? 'sürüyor' : saatYaz(g[1]) + (g[0] > 1700000000 && g[1] > 1700000000 ? ' (' + sureYaz(g[1] - g[0]) + ')' : ''))).join('\n')
+      : 'Kayıtlı kesinti yok';
+    const pill = document.getElementById('sebPill');
+    pill.textContent = 'Şebeke: ' + (v.var ? 'var' : 'KESİK') + (canli ? '' : ' (son bilinen)');
+    pill.className = 'pill ' + (v.var ? 'ok' : 'err');
+    pill.style.display = '';
   }
   setInterval(ciz, 1000);
 
@@ -335,6 +398,15 @@
       pe.textContent = 'HMI pil: %' + p.p + (ad ? ' · ' + ad : '');
       pe.className = 'pill ' + (p.s !== 'pil' ? 'ok' : p.p < 20 ? 'err' : p.p < 40 ? 'warn' : 'ok');
       pe.style.display = '';
+      return;
+    }
+    if (konu === 'msan/batarya/5') {   // şebeke kartı
+      let s; try { s = JSON.parse(metin); } catch (e) { return; }
+      if (!s || s.tip !== 'sebeke') return;   // parça onayı vb.
+      seb.veri = s;
+      if (!paket.retain) seb.canliMs = Date.now();
+      else if (typeof s.t === 'number' && s.t > 1700000000) seb.canliMs = Math.min(Date.now(), s.t * 1000);
+      ciz();
       return;
     }
     const m = konu.match(/^msan\/batarya\/([1-4])$/);

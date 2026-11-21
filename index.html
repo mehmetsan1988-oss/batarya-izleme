@@ -94,7 +94,7 @@
   <div class="not">
     Veriler kartlardan doğrudan buluta (EMQX) gelir; HMI ekran kapalıyken de görünür.
     Sayfa yalnızca okur, kartlara komut göndermez. Kartlar derin uyku modundaysa veri 5 dakikada bir gelir.
-    "Son bilinen değer": sayfa açılınca buluttan gelen saklanmış son ölçüm; yaşı bilinmez, kartın şu an açık olduğunu göstermez.
+    Kartlar (K1.5.3+) her ölçüme saat damgası ekler; sayfa açılır açılmaz son ölçümün gerçek yaşı görünür.
   </div>
 </main>
 
@@ -244,8 +244,9 @@
         rozet.textContent = 'Çevrimdışı'; rozet.style.color = '#FFD6D6';
         yas.textContent = 'son veri ' + yasYaz(Math.round((simdi - d.canliMs) / 1000));
       } else {
+        // Saat damgası olmayan saklanmış değer (K1.5.2 ve öncesi kartlar): ilk canlı mesaj beklenir
         rozet.textContent = 'Son bilinen değer'; rozet.style.color = '#C9D2DA';
-        yas.textContent = 'yaşı bilinmiyor';
+        yas.textContent = 'canlı veri bekleniyor…';
       }
       e.classList.toggle('on', canli);
       e.classList.toggle('eski', !canli);
@@ -332,7 +333,12 @@
     if (!v || typeof v.v !== 'number' || v.v < 0.5 || v.v > 30) return;   // parça onayı vb. (voltaj yok)
     const d = durum[+m[1] - 1];
     d.veri = Object.assign({}, d.veri || {}, v);
-    if (!paket.retain) d.canliMs = Date.now();
+    if (!paket.retain) {
+      d.canliMs = Date.now();
+    } else if (typeof v.t === 'number' && v.t > 1700000000) {
+      // K1.5.3+: ölçümün saat damgası var -> saklanmış değerin de gerçek yaşı bilinir
+      d.canliMs = Math.min(Date.now(), v.t * 1000);
+    }
     ciz();
   }
 </script>
